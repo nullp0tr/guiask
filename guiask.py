@@ -192,6 +192,21 @@ class TerminalScreenshot(object):
         return identifiers
 
 
+class HeadlineDetailsScreenshot(TerminalScreenshot):
+
+    def __init__(self,
+                 name,
+                 headline,
+                 detailed_entries,
+                 font=medium_circle_char_font,
+                 scale=1,
+                 input_handler=None,
+                 color=None):
+        TerminalScreenshot.__init__(self, name)
+        self.input_handler = input_handler
+        self.append_drawable(TerminalHeadline(headline, font, scale, color))
+
+
 class HeadlineListScreenshot(TerminalScreenshot):
 
     def __init__(self,
@@ -200,11 +215,11 @@ class HeadlineListScreenshot(TerminalScreenshot):
                  list_entries,
                  font=medium_circle_char_font,
                  scale=1,
-                 input_handler=None):
+                 input_handler=None,
+                 color=None):
         TerminalScreenshot.__init__(self, name)
-        self.name = name
         self.input_handler = input_handler
-        self.append_drawable(TerminalHeadline(headline, font, scale, None))
+        self.append_drawable(TerminalHeadline(headline, font, scale, color))
         for list_entry in list_entries:
             scrollable = list_entry.get('scrollable', True)
             prefix = list_entry.get('prefix', None)
@@ -232,11 +247,12 @@ class HeadlineInputListScreenshot(TerminalScreenshot):
                  list_entries,
                  font=medium_circle_char_font,
                  scale=1,
-                 input_handler=None):
+                 input_handler=None,
+                 color=None):
         TerminalScreenshot.__init__(self, name)
         self.name = name
         self.input_handler = input_handler
-        self.append_drawable(TerminalHeadline(headline, font, scale, None))
+        self.append_drawable(TerminalHeadline(headline, font, scale, color))
         for list_entry in list_entries:
             prefix = list_entry.get('prefix', None)
             align_to_center = list_entry.get('align_to_center', False)
@@ -292,6 +308,7 @@ class TerminalScreen(object):
 
     def _update_screen_size(self):
         self.columns, self.lines = shutil.get_terminal_size((80, 20))
+        self.columns = self.columns
         self.last_line = self.lines - 2
 
     @staticmethod
@@ -353,8 +370,22 @@ class TerminalScreen(object):
                            line_ + gcolors.gcolors['normal']
                     self.printable.append(line)
             else:
-                line = ' ' * indent + prefix + color + drawable.draw(columns=self.columns, lines=self.lines) + \
-                       gcolors.gcolors['normal']
+                line_ = drawable.draw(columns=self.columns, lines=self.lines)
+                line_start = ' ' * indent + prefix
+
+                def strindinsert(string, index, char):
+                    return string[:index] + char + string[index:]
+
+                i = len(line_start)
+                for ii, _ in enumerate(line_):
+                    if i >= self.columns :
+                        line_ = strindinsert(line_, ii, '\n')
+                        i = 0
+                    else:
+                        i += 1
+
+                line = line_start + color + line_ + gcolors.gcolors['normal']
+
                 self.printable.append(line)
 
         new_printable = self._clear_screen()
