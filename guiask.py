@@ -43,7 +43,6 @@ class TKeys:
 
 # add scrollable attribute
 class TerminalDrawable(object):
-
     def __init__(self):
         self.scrollable = False
         self.input_scrollable = False
@@ -64,7 +63,6 @@ class TerminalDrawable(object):
 
 
 class TerminalListItem(TerminalDrawable):
-
     def __init__(self,
                  name,
                  indent=None,
@@ -100,7 +98,6 @@ class TerminalListItem(TerminalDrawable):
 
 
 class TerminalInputListItem(TerminalDrawable):
-
     def __init__(self,
                  name,
                  indent=None,
@@ -128,17 +125,14 @@ class TerminalInputListItem(TerminalDrawable):
 
     def addtodrawable(self, *args, **kwargs):
         tobeadded = kwargs.get('tobeadded', '')
+        esclines = ('\n', '\r', '\t', '\f')
         if tobeadded == '\x7f':
             self.input = self.input[:-1]
-        elif tobeadded != '\n' and \
-            tobeadded != '\r' and \
-            tobeadded != '\t' and \
-                tobeadded != '\f':
+        elif tobeadded not in esclines:
             self.input += tobeadded
 
 
 class TerminalHeadline(TerminalDrawable):
-
     def __init__(self, headline, font, scale, color=None):
         TerminalDrawable.__init__(self)
         self.saved_headline = buildbigcharfont(
@@ -164,7 +158,6 @@ class TerminalHeadline(TerminalDrawable):
 
 
 class TerminalScreenshot(object):
-
     def __init__(self, name):
         self.name = name
         self.drawables = []
@@ -192,23 +185,7 @@ class TerminalScreenshot(object):
         return identifiers
 
 
-class HeadlineDetailsScreenshot(TerminalScreenshot):
-
-    def __init__(self,
-                 name,
-                 headline,
-                 detailed_entries,
-                 font=medium_circle_char_font,
-                 scale=1,
-                 input_handler=None,
-                 color=None):
-        TerminalScreenshot.__init__(self, name)
-        self.input_handler = input_handler
-        self.append_drawable(TerminalHeadline(headline, font, scale, color))
-
-
 class HeadlineListScreenshot(TerminalScreenshot):
-
     def __init__(self,
                  name,
                  headline,
@@ -240,7 +217,6 @@ class HeadlineListScreenshot(TerminalScreenshot):
 
 
 class HeadlineInputListScreenshot(TerminalScreenshot):
-
     def __init__(self,
                  name,
                  headline,
@@ -273,43 +249,43 @@ class HeadlineInputListScreenshot(TerminalScreenshot):
 
 
 class TerminalScreen(object):
-
-    def __init__(self, input_handler=None, key_mode=True,
-                 terminal_columns=80, terminal_lines=20):
+    def __init__(self, input_handler=None, terminal_columns=80, terminal_lines=20):
 
         self.columns, self.lines = shutil.get_terminal_size(
             (terminal_columns, terminal_lines))
-        self.command_buffer = ''
-        self.key_mode = key_mode
-        self.highlighted = None
-        self.input_scrollables = []
-        self.scrollable_list = []
-        self.current_screenshot = 0
-        self.screenshot = None
-        self.drawables = []
+        self.screenshot_in_focus = None
+        self.screenshots = []
         self.input_handler = input_handler
         self.last_line = self.lines - 2
-        self.lines_scrolled = 0
-        self.can_scroll_down = False
-        self.printable_size = 0
+        self.columns_per_scr = self.columns
 
     def _clean_values(self):
-        self.highlighted = None
-        self.drawables.clear()
-        self.scrollable_list.clear()
-        self.input_scrollables.clear()
-        self.lines_scrolled = 0
+        pass
 
     def load(self, screenshot):
         self._clean_values()
-        self.drawables = screenshot.drawables
-        self.scrollable_list = screenshot.scrollables
-        self.screenshot = screenshot
+        self.screenshot_in_focus = screenshot
+
+    def hotload(self, screenshot):
+        self._clean_values()
+        scrollables = screenshot.scrollables
+        screenshot_ = {'screenshot': screenshot, 'scrollables': scrollables, 'input_scrollables': [],
+                       'lines_scrolled': 0, 'printable_size': 0, 'can_scroll_down': False,
+                       'highlighted': None}
+        self.screenshots += [screenshot_, ]
+        self.columns_per_scr = int(self.columns / len(self.screenshots))
+        self.screenshot_in_focus = self.screenshots[-1]
+
+    def unload(self):
+        self.screenshots.clear()
 
     def _update_screen_size(self):
         self.columns, self.lines = shutil.get_terminal_size((80, 20))
         self.columns = self.columns
         self.last_line = self.lines - 2
+        self.columns_per_scr = self.columns
+        if self.screenshots:
+            self.columns_per_scr = int(self.columns / len(self.screenshots))
 
     @staticmethod
     def _clear_screen():
@@ -318,9 +294,9 @@ class TerminalScreen(object):
     def _cursor_down(self):
         return "\033[" + str(self.lines - 1) + ";3H"
 
-    def _draw_screenshot(self):
-        self.printable = []
-        for i, drawable in enumerate(self.drawables):
+    def _draw_screenshot(self, tbscr, scrindex=0):
+        printable = []
+        for i, drawable in enumerate(tbscr['screenshot'].drawables):
 
             color = ''
             indent = 0
@@ -338,37 +314,48 @@ class TerminalScreen(object):
                 if drawable.align_to_center:
                     indent = int((self.columns - len(drawable.draw())) / 2)
 
-            if drawable.input_scrollable:
+            screenshot_is_in_focus = self.screenshot_in_focus['screenshot'] == tbscr['screenshot']
+
+            if drawable.input_scrollable and screenshot_is_in_focus:
                 if drawable.fulfilled:
-                    if i in self.input_scrollables:
-                        self.input_scrollables.remove(i)
-                        self.highlighted = None
+                    if i in tbscr['input_scrollables']:
+                        tbscr['input_scrollables'].remove(i)
 
                 else:
-                    if i not in self.input_scrollables:
-                        self.input_scrollables.append(i)
-                    if self.input_scrollables[0] == i:
-                        self.highlighted = i
+                    if i not in tbscr['input_scrollables']:
+                        tbscr['input_scrollables'].append(i)
+                    if tbscr['input_scrollables'][0] == i:
+                        tbscr['highlighted'] = i
+
                         color = gcolors.gcolors['highlighted']
 
-            if drawable.scrollable and len(self.input_scrollables) == 0:
-                if i not in self.scrollable_list:
-                    self.scrollable_list.append(i)
-                is_highlighted = self.highlighted == i
-                noting_is_highlighted = self.highlighted is None
-                if is_highlighted or noting_is_highlighted:
+            if drawable.scrollable and len(tbscr['input_scrollables']) == 0 and screenshot_is_in_focus:
+                if i not in self.screenshot_in_focus['scrollables']:
+                    self.screenshot_in_focus['scrollables'].append(i)
+
+                # is_highlighted = tbscr['highlighted'] == i
+                is_highlighted = self.screenshot_in_focus['highlighted'] == i
+
+                # noting_is_highlighted = tbscr['highlighted'] is None
+                noting_is_highlighted = self.screenshot_in_focus['highlighted'] is None
+
+                if (is_highlighted or noting_is_highlighted) and screenshot_is_in_focus:
                     color = gcolors.gcolors['highlighted']
-                    self.highlighted = i
+                    # tbscr['highlighted'] = i
+                    self.screenshot_in_focus['highlighted'] = i
+
+            scrsplitfix = ("\033[" + str(self.columns_per_scr) + "C")
 
             if isinstance(drawable, TerminalHeadline):
                 headline = drawable.draw(
-                    columns=self.columns,
+                    columns=self.columns_per_scr,
                     lines=self.lines)
                 lines = headline.split('\n')
                 for line_ in lines:
                     line = ' ' * indent + prefix + color + \
                            line_ + gcolors.gcolors['normal']
-                    self.printable.append(line)
+                    line = scrsplitfix * scrindex + line
+                    printable.append(line)
             else:
                 line_ = drawable.draw(columns=self.columns, lines=self.lines)
                 line_start = ' ' * indent + prefix
@@ -376,59 +363,74 @@ class TerminalScreen(object):
                 def strindinsert(string, index, char):
                     return string[:index] + char + string[index:]
 
-                i = len(line_start)
+                j = len(line_start)
                 for ii, _ in enumerate(line_):
-                    if i >= self.columns :
-                        line_ = strindinsert(line_, ii, '\n')
-                        i = 0
+                    if j >= self.columns_per_scr:
+                        line_ = strindinsert(line_, ii, '\n' + scrsplitfix * scrindex)
+                        j = 0
                     else:
-                        i += 1
+                        j += 1
 
                 line = line_start + color + line_ + gcolors.gcolors['normal']
+                line = scrsplitfix * scrindex + line
+                printable.append(line)
 
-                self.printable.append(line)
+        scrcursup = "\033[0;0H"
+        scrsplitfix = ("\033[" + str(self.columns_per_scr) + "C")
+        new_printable = scrcursup
+        lines_scrolled = tbscr['lines_scrolled']
 
-        new_printable = self._clear_screen()
-        for i, line in enumerate(self.printable[self.lines_scrolled:]):
-            if i == self.last_line:
-                self.can_scroll_down = True
-                self.printable_size = len(self.printable)
-                new_printable += '.....'
+        for iii, line in enumerate(printable[lines_scrolled:]):
+            if iii == self.last_line:
+                tbscr['can_scroll_down'] = True
+                tbscr['printable_size'] = len(printable)
+                new_printable += scrsplitfix * scrindex + '.....'
                 break
-            self.can_scroll_down = False
+            tbscr['can_scroll_down'] = False
             new_printable += line + '\n'
 
-        print(new_printable)
+        return new_printable
 
     def scrollup(self):
         try:
-            index_of_current_scrollable = self.scrollable_list.index(
-                self.highlighted)
-            self.highlighted = self.scrollable_list[
+            index_of_current_scrollable = self.screenshot_in_focus['scrollables'].index(
+                self.screenshot_in_focus['highlighted'])
+            self.screenshot_in_focus['highlighted'] = self.screenshot_in_focus['scrollables'][
                 index_of_current_scrollable - 1]
-            if self.lines_scrolled == 0 and self.scrollable_list[-1] == self.highlighted:
-                self.lines_scrolled = self.printable_size - self.last_line
-                self.lines_scrolled += 1
-            if self.lines_scrolled > 0 and index_of_current_scrollable + (self.lines / 4) < len(self.scrollable_list):
-                self.lines_scrolled -= 1
+            no_lines_scrolled = self.screenshot_in_focus['lines_scrolled'] == 0
+            is_last_line = self.screenshot_in_focus['scrollables'][-1] == self.screenshot_in_focus['highlighted']
+            if no_lines_scrolled and is_last_line:
+                self.screenshot_in_focus['lines_scrolled'] = self.screenshot_in_focus['printable_size'] - self.last_line
+                self.screenshot_in_focus['lines_scrolled'] += 1
+            if self.screenshot_in_focus['lines_scrolled'] > 0 and index_of_current_scrollable + int(
+                    (self.lines / 4)) < len(
+                    self.screenshot_in_focus['scrollables']):
+                self.screenshot_in_focus['lines_scrolled'] -= 1
         except IndexError:
-            self.highlighted = self.scrollable_list[-1]
+            self.screenshot_in_focus['lines_scrolled'] = self.screenshot_in_focus['scrollables'][-1]
         except ValueError:
             pass
 
     def scrolldown(self):
         try:
-            index_of_current_scrollable = self.scrollable_list.index(
-                self.highlighted)
-            self.highlighted = self.scrollable_list[
+            index_of_current_scrollable = self.screenshot_in_focus['scrollables'].index(
+                self.screenshot_in_focus['highlighted'])
+            self.screenshot_in_focus['highlighted'] = self.screenshot_in_focus['scrollables'][
                 index_of_current_scrollable + 1]
-            if self.can_scroll_down:
-                self.lines_scrolled += 1
+            if self.screenshot_in_focus['can_scroll_down']:
+                self.screenshot_in_focus['lines_scrolled'] += 1
         except IndexError:
-            self.highlighted = self.scrollable_list[0]
-            self.lines_scrolled = 0
+            self.screenshot_in_focus['highlighted'] = self.screenshot_in_focus['scrollables'][0]
+            self.screenshot_in_focus['lines_scrolled'] = 0
         except ValueError:
             pass
+
+    def gorightfocus(self):
+        for i, screenshot_ in enumerate(self.screenshots):
+            if self.screenshot_in_focus == screenshot_ and i <= len(self.screenshots):
+                self.screenshot_in_focus = self.screenshots[i + 1]
+                return
+            self.screenshot_in_focus = self.screenshots[0]
 
     def _get_input(self):
         ch = getchar()
@@ -436,16 +438,22 @@ class TerminalScreen(object):
             return
         if self.input_handler is not None:
             self.input_handler(char=ch)
-        ids = self.screenshot.get_identifiers(selected_entry=self.highlighted)
-        if self.screenshot.input_handler is not None:
-            self.screenshot.input_handler(
-                char=ch, screenshot_name=self.screenshot.name, ids=ids,
-                screenshot=self.screenshot, selected_entry=self.highlighted,
+        ids = self.screenshot_in_focus['screenshot'].get_identifiers(
+            selected_entry=self.screenshot_in_focus['highlighted'])
+
+        if self.screenshot_in_focus['screenshot'].input_handler is not None:
+            self.screenshot_in_focus['screenshot'].input_handler(
+                char=ch, screenshot_name=self.screenshot_in_focus['screenshot'].name, ids=ids,
+                screenshot=self.screenshot_in_focus['screenshot'],
+                selected_entry=self.screenshot_in_focus['highlighted'],
                 screen=self)
 
     def loop(self):
         while True:
             self._update_screen_size()
-            if self.screenshot is not None:
-                self._draw_screenshot()
+            prnta = ''
+            for i, tbscr in enumerate(self.screenshots):
+                prnt = self._draw_screenshot(tbscr, scrindex=i)
+                prnta += prnt
+            print(self._clear_screen() + prnta)
             self._get_input()
