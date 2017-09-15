@@ -89,8 +89,6 @@ class TerminalListItem(TerminalDrawable):
         self.name = '\033[' + str(indent) + 'C' + self.name
 
     def draw(self, *args, **kwargs):
-        if self.align_to_center:
-            self._align_to_center(columns=kwargs['columns'])
         return self.name
 
     def __str__(self):
@@ -259,25 +257,19 @@ class TerminalScreen(object):
         self.last_line = self.lines - 2
         self.columns_per_scr = self.columns
 
-    def _clean_values(self):
-        pass
-
-    def load(self, screenshot):
-        self._clean_values()
-        self.screenshot_in_focus = screenshot
-
     def hotload(self, screenshot):
-        self._clean_values()
         scrollables = screenshot.scrollables
         screenshot_ = {'screenshot': screenshot, 'scrollables': scrollables, 'input_scrollables': [],
                        'lines_scrolled': 0, 'printable_size': 0, 'can_scroll_down': False,
                        'highlighted': None}
         self.screenshots += [screenshot_, ]
         self.columns_per_scr = int(self.columns / len(self.screenshots))
-        self.screenshot_in_focus = self.screenshots[-1]
+        if self.screenshot_in_focus is None:
+            self.screenshot_in_focus = self.screenshots[-1]
 
     def unload(self):
         self.screenshots.clear()
+        self.screenshot_in_focus = None
 
     def _update_screen_size(self):
         self.columns, self.lines = shutil.get_terminal_size((80, 20))
@@ -312,7 +304,7 @@ class TerminalScreen(object):
 
             if hasattr(drawable, 'align_to_center'):
                 if drawable.align_to_center:
-                    indent = int((self.columns - len(drawable.draw())) / 2)
+                    indent = int((self.columns_per_scr - len(drawable.draw())) / 2)
 
             screenshot_is_in_focus = self.screenshot_in_focus['screenshot'] == tbscr['screenshot']
 
@@ -448,12 +440,15 @@ class TerminalScreen(object):
                 selected_entry=self.screenshot_in_focus['highlighted'],
                 screen=self)
 
+    def _draw(self):
+        prnta = ''
+        for i, tbscr in enumerate(self.screenshots):
+            prnt = self._draw_screenshot(tbscr, scrindex=i)
+            prnta += prnt
+        print(self._clear_screen() + prnta + self._cursor_down())
+
     def loop(self):
         while True:
             self._update_screen_size()
-            prnta = ''
-            for i, tbscr in enumerate(self.screenshots):
-                prnt = self._draw_screenshot(tbscr, scrindex=i)
-                prnta += prnt
-            print(self._clear_screen() + prnta)
+            self._draw()
             self._get_input()
