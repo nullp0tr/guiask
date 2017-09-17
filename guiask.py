@@ -156,15 +156,22 @@ class TerminalHeadline(TerminalDrawable):
 
 
 class TerminalScreenshot(object):
-    def __init__(self, name):
-        self.name = name
-        self.drawables = []
-        self.scrollables = []
-        self.input_scrollables = []
-        self.input_handler = None
-        self.identifiers = {}
+    def __init__(self, *args, **kwargs):
+        self.name = kwargs.get('name', '')
+        self.input_handler = kwargs.get('input_handler', None)
+        self.align_vertically = kwargs.get('align_vertically', False)
+        if not hasattr(self, 'drawables'):
+            self.drawables = []
+            self.scrollables = []
+            self.input_scrollables = []
+            self.identifiers = {}
 
     def append_drawable(self, drawable):
+        if not hasattr(self, 'drawables'):
+            self.drawables = []
+            self.scrollables = []
+            self.input_scrollables = []
+            self.identifiers = {}
         self.drawables += [drawable, ]
         if drawable.scrollable:
             current_index = len(self.drawables) - 1
@@ -184,17 +191,15 @@ class TerminalScreenshot(object):
 
 
 class HeadlineListScreenshot(TerminalScreenshot):
-    def __init__(self,
-                 name,
-                 headline,
-                 list_entries,
-                 font=medium_circle_char_font,
-                 scale=1,
-                 input_handler=None,
-                 color=None):
-        TerminalScreenshot.__init__(self, name)
-        self.input_handler = input_handler
-        self.append_drawable(TerminalHeadline(headline, font, scale, color))
+    def __init__(self, *args, **kwargs):
+        TerminalScreenshot.__init__(self, *args, **kwargs)
+        headline = kwargs.get('headline', None)
+        font = kwargs.get('font', medium_circle_char_font)
+        scale = kwargs.get('scale', 1)
+        color = kwargs.get('color', None)
+        list_entries = kwargs.get('list_entries', [])
+        if headline:
+            self.append_drawable(TerminalHeadline(headline, font, scale, color))
         for list_entry in list_entries:
             scrollable = list_entry.get('scrollable', True)
             prefix = list_entry.get('prefix', None)
@@ -203,46 +208,27 @@ class HeadlineListScreenshot(TerminalScreenshot):
             name = list_entry.get('entry', '')
             color = list_entry.get('color', None)
             indent = list_entry.get('indent', None)
-            drawable = TerminalListItem(
-                name=name,
-                color=color,
-                indent=indent,
-                scrollable=scrollable,
-                prefix=prefix,
-                identifiers=identifiers,
-                align_to_center=align_to_center)
-            self.append_drawable(drawable=drawable)
+            has_input = list_entry.get('has_input', False)
+            if not has_input:
+                drawable = TerminalListItem(
+                    name=name,
+                    color=color,
+                    indent=indent,
+                    scrollable=scrollable,
+                    prefix=prefix,
+                    identifiers=identifiers,
+                    align_to_center=align_to_center)
+            else:
+                hidden = list_entry.get('hidden', False)
+                drawable = TerminalInputListItem(
+                    name=name,
+                    color=color,
+                    indent=indent,
+                    prefix=prefix,
+                    align_to_center=align_to_center,
+                    identifiers=identifiers,
+                    hidden=hidden)
 
-
-class HeadlineInputListScreenshot(TerminalScreenshot):
-    def __init__(self,
-                 name,
-                 headline,
-                 list_entries,
-                 font=medium_circle_char_font,
-                 scale=1,
-                 input_handler=None,
-                 color=None):
-        TerminalScreenshot.__init__(self, name)
-        self.name = name
-        self.input_handler = input_handler
-        self.append_drawable(TerminalHeadline(headline, font, scale, color))
-        for list_entry in list_entries:
-            prefix = list_entry.get('prefix', None)
-            align_to_center = list_entry.get('align_to_center', False)
-            identifiers = list_entry.get('ids', None)
-            name = list_entry.get('entry', '')
-            color = list_entry.get('color', None)
-            indent = list_entry.get('indent', None)
-            hidden = list_entry.get('hidden', False)
-            drawable = TerminalInputListItem(
-                name=name,
-                color=color,
-                indent=indent,
-                prefix=prefix,
-                align_to_center=align_to_center,
-                identifiers=identifiers,
-                hidden=hidden)
             self.append_drawable(drawable=drawable)
 
 
@@ -367,7 +353,14 @@ class TerminalScreen(object):
                 line = scrsplitfix * scrindex + line
                 printable.append(line)
 
+        tbscr['printable_size'] = len(printable)
         scrcursup = "\033[0;0H"
+        if tbscr['screenshot'].align_vertically:
+            num_of_lines = tbscr['printable_size']
+            diff = int(self.last_line / 2 - num_of_lines / 2)
+            if diff > 0:
+                scrcursup = "\033[" + str(diff) + ";0H"
+
         scrsplitfix = ("\033[" + str(self.columns_per_scr) + "C")
         new_printable = scrcursup
         lines_scrolled = tbscr['lines_scrolled']
@@ -375,7 +368,6 @@ class TerminalScreen(object):
         for iii, line in enumerate(printable[lines_scrolled:]):
             if iii == self.last_line:
                 tbscr['can_scroll_down'] = True
-                tbscr['printable_size'] = len(printable)
                 new_printable += scrsplitfix * scrindex + '.....'
                 break
             tbscr['can_scroll_down'] = False
